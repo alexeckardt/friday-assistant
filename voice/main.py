@@ -98,13 +98,18 @@ async def twiml_handler(request: Request):
 async def websocket_handler(websocket: WebSocket):
     await websocket.accept()
     call_sid = "unknown"
+    stream_sid = "unknown"
     try:
-        # First message from Twilio is a "connected" event with CallSid
-        raw = await websocket.receive_text()
-        data = json.loads(raw)
-        if data.get("event") == "connected":
-            call_sid = data.get("start", {}).get("callSid", "unknown")
-        await run_call_pipeline(websocket, call_sid)
+        # Twilio sends "connected" then "start" before any audio frames
+        for _ in range(2):
+            raw = await websocket.receive_text()
+            data = json.loads(raw)
+            if data.get("event") == "start":
+                start = data.get("start", {})
+                call_sid = start.get("callSid", "unknown")
+                stream_sid = data.get("streamSid", "unknown")
+                break
+        await run_call_pipeline(websocket, call_sid, stream_sid)
     except WebSocketDisconnect:
         logger.info(f"WebSocket disconnected — CallSid={call_sid}")
     except Exception as e:

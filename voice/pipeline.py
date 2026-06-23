@@ -19,7 +19,8 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.anthropic import AnthropicLLMService
 from pipecat.services.deepgram import DeepgramSTTService, LiveOptions
 from pipecat.services.elevenlabs import ElevenLabsTTSService
-from pipecat.transports.services.twilio import TwilioParams, TwilioTransport
+from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams, FastAPIWebsocketTransport
+from pipecat.serializers.twilio import TwilioFrameSerializer
 
 from voice.config import settings
 from voice.prompts import SYSTEM_PROMPT
@@ -35,19 +36,20 @@ async def _build_memory_context(seed: str = "greeting preferences schedule") -> 
     return "Relevant context from memory:\n" + "\n".join(f"- {l}" for l in lines)
 
 
-async def run_call_pipeline(websocket, call_sid: str) -> None:
+async def run_call_pipeline(websocket, call_sid: str, stream_sid: str) -> None:
     """Entry point per call. Runs until the call ends or an error occurs."""
-    logger.info(f"Pipeline starting — CallSid={call_sid}")
+    logger.info(f"Pipeline starting — CallSid={call_sid} StreamSid={stream_sid}")
 
     # ── Transport ─────────────────────────────────────────────────────────────
-    transport = TwilioTransport(
+    transport = FastAPIWebsocketTransport(
         websocket,
-        TwilioParams(
+        FastAPIWebsocketParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
             vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
             vad_audio_passthrough=True,
+            serializer=TwilioFrameSerializer(stream_sid, call_sid=call_sid),
         ),
     )
 

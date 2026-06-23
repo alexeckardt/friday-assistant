@@ -1,4 +1,4 @@
-.PHONY: up down dev logs build shell import-workflows
+.PHONY: up down dev logs build build-clean shell import-workflows
 
 # ── Local dev (docker-compose) ────────────────────────────────────────────────
 up:
@@ -11,6 +11,9 @@ down:
 	docker compose down
 
 build:
+	docker compose build
+
+build-clean:
 	docker compose build --no-cache
 
 logs:
