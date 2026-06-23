@@ -1,0 +1,120 @@
+{
+  "name": "Friday — Task: Research",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger-research",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const desc = $input.first().json.task_description;\nconst params = $input.first().json.params || {};\nconst query = params.query || desc;\nreturn [{ json: { query, task_description: desc, callback_phone: $input.first().json.callback_phone } }];"
+      },
+      "id": "extract-query",
+      "name": "Extract Query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.search.brave.com/res/v1/web/search",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Accept", "value": "application/json" },
+            { "name": "Accept-Encoding", "value": "gzip" },
+            { "name": "X-Subscription-Token", "value": "={{ $vars.BRAVE_SEARCH_API_KEY }}" }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "q", "value": "={{ $json.query }}" },
+            { "name": "count", "value": "5" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "brave-search",
+      "name": "Brave Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = $input.first().json.web?.results || [];\nconst snippets = results.map(r => `${r.title}: ${r.description}`).join('\\n');\nconst query = $('Extract Query').item.json.query;\nreturn [{ json: { snippets, query, callback_phone: $('Extract Query').item.json.callback_phone } }];"
+      },
+      "id": "format-results",
+      "name": "Format Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "claude-sonnet-4-6",
+          "mode": "list",
+          "cachedResultName": "claude-sonnet-4-6"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "You are Friday, a personal AI assistant. Summarise the following search results into a concise, SMS-friendly answer (under 300 characters ideally). Focus on the most actionable facts.\n\nQuery: {{ $json.query }}\n\nResults:\n{{ $json.snippets }}"
+            }
+          ]
+        },
+        "options": {
+          "maxTokensToSample": 300
+        }
+      },
+      "id": "claude-summarise",
+      "name": "Claude: Summarise",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1,
+      "position": [1120, 300],
+      "credentials": {
+        "anthropicApi": {
+          "id": "anthropic-creds",
+          "name": "Anthropic"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const summary = $input.first().json.text || $input.first().json.content?.[0]?.text || 'Research complete.';\nreturn [{ json: { result: summary, callback_phone: $('Format Results').item.json.callback_phone, task_name: 'research' } }];"
+      },
+      "id": "build-result",
+      "name": "Build Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 300]
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [[{ "node": "Extract Query", "type": "main", "index": 0 }]]
+    },
+    "Extract Query": {
+      "main": [[{ "node": "Brave Search", "type": "main", "index": 0 }]]
+    },
+    "Brave Search": {
+      "main": [[{ "node": "Format Results", "type": "main", "index": 0 }]]
+    },
+    "Format Results": {
+      "main": [[{ "node": "Claude: Summarise", "type": "main", "index": 0 }]]
+    },
+    "Claude: Summarise": {
+      "main": [[{ "node": "Build Result", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": ["friday", "research"]
+}

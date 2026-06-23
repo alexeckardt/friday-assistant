@@ -1,0 +1,183 @@
+{
+  "name": "Friday — Task Dispatcher",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "trigger-task",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook: Trigger Task",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const token = $input.first().json.headers?.['x-task-token'] || '';\nconst expected = $vars.N8N_TASK_TOKEN || '';\nif (expected && token !== expected) {\n  throw new Error('Unauthorized: invalid task token');\n}\nconst body = $input.first().json.body;\nreturn [{ json: { task_name: body.task_name, task_description: body.task_description, params: body.params || {}, callback_phone: body.callback_phone } }];"
+      },
+      "id": "validate-and-parse",
+      "name": "Validate & Parse",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.task_name }}",
+        "rules": {
+          "rules": [
+            { "value2": "research", "output": 0 },
+            { "value2": "calendar_analysis", "output": 1 },
+            { "value2": "draft_email", "output": 2 },
+            { "value2": "custom", "output": 3 }
+          ]
+        },
+        "fallbackOutput": 3
+      },
+      "id": "route-by-task",
+      "name": "Route by Task",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "={{ $vars.WORKFLOW_ID_RESEARCH }}",
+          "mode": "id"
+        },
+        "options": { "waitForSubWorkflow": true }
+      },
+      "id": "run-research",
+      "name": "Run: Research",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [900, 140]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "={{ $vars.WORKFLOW_ID_CALENDAR }}",
+          "mode": "id"
+        },
+        "options": { "waitForSubWorkflow": true }
+      },
+      "id": "run-calendar",
+      "name": "Run: Calendar",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "agent": "conversationalAgent",
+        "promptType": "define",
+        "text": "={{ $('Validate & Parse').item.json.task_description }}",
+        "options": {
+          "systemMessage": "You are Friday, a personal AI assistant. Complete the following task and return a concise result suitable for an SMS (under 300 chars). Task: {{ $json.task_description }}"
+        }
+      },
+      "id": "claude-custom",
+      "name": "Claude: Custom Task",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1,
+      "position": [900, 460]
+    },
+    {
+      "parameters": {
+        "model": "claude-sonnet-4-6",
+        "options": {}
+      },
+      "id": "claude-model",
+      "name": "Claude Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1,
+      "position": [900, 620],
+      "credentials": {
+        "anthropicApi": {
+          "id": "anthropic-creds",
+          "name": "Anthropic"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge result from whichever branch ran\nconst subResult = $input.first().json.result || $input.first().json.output || 'Task complete.';\nconst original = $('Validate & Parse').item.json;\nreturn [{ json: { result: subResult, callback_phone: original.callback_phone, task_name: original.task_name } }];"
+      },
+      "id": "merge-result",
+      "name": "Merge Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "={{ $vars.WORKFLOW_ID_NOTIFY }}",
+          "mode": "id"
+        },
+        "options": { "waitForSubWorkflow": false }
+      },
+      "id": "notify-complete",
+      "name": "Notify Complete",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"status\": \"queued\" }",
+        "options": {}
+      },
+      "id": "respond-ok",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1560, 300]
+    }
+  ],
+  "connections": {
+    "Webhook: Trigger Task": {
+      "main": [[{ "node": "Validate & Parse", "type": "main", "index": 0 }]]
+    },
+    "Validate & Parse": {
+      "main": [
+        [{ "node": "Route by Task", "type": "main", "index": 0 }],
+        [{ "node": "Respond OK", "type": "main", "index": 0 }]
+      ]
+    },
+    "Route by Task": {
+      "main": [
+        [{ "node": "Run: Research", "type": "main", "index": 0 }],
+        [{ "node": "Run: Calendar", "type": "main", "index": 0 }],
+        [{ "node": "Claude: Custom Task", "type": "main", "index": 0 }],
+        [{ "node": "Claude: Custom Task", "type": "main", "index": 0 }]
+      ]
+    },
+    "Run: Research": {
+      "main": [[{ "node": "Merge Result", "type": "main", "index": 0 }]]
+    },
+    "Run: Calendar": {
+      "main": [[{ "node": "Merge Result", "type": "main", "index": 0 }]]
+    },
+    "Claude: Custom Task": {
+      "main": [[{ "node": "Merge Result", "type": "main", "index": 0 }]]
+    },
+    "Claude Model": {
+      "ai_languageModel": [[{ "node": "Claude: Custom Task", "type": "ai_languageModel", "index": 0 }]]
+    },
+    "Merge Result": {
+      "main": [[{ "node": "Notify Complete", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": ["friday", "dispatcher"]
+}

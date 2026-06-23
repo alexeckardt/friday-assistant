@@ -1,0 +1,109 @@
+version: "3.8"
+
+# ── Volumes ───────────────────────────────────────────────────────────────────
+volumes:
+  friday_data:    # Shared: ChromaDB, SQLite, notes
+  postgres_data:  # n8n database
+
+# ── Networks ──────────────────────────────────────────────────────────────────
+networks:
+  friday_net:
+    driver: bridge
+
+# ── Services ──────────────────────────────────────────────────────────────────
+services:
+
+  # ── Friday voice service (Pipecat + FastAPI) ─────────────────────────────
+  voice:
+    build:
+      context: ./voice
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    networks: [friday_net]
+    ports:
+      - "${SERVICE_PORT:-8000}:8000"
+    volumes:
+      - friday_data:/data
+    environment:
+      ASSISTANT_NAME:          ${ASSISTANT_NAME:-Friday}
+      YOUR_NAME:               ${YOUR_NAME}
+      TWILIO_ACCOUNT_SID:      ${TWILIO_ACCOUNT_SID}
+      TWILIO_AUTH_TOKEN:       ${TWILIO_AUTH_TOKEN}
+      TWILIO_PHONE_NUMBER:     ${TWILIO_PHONE_NUMBER}
+      YOUR_PHONE_NUMBER:       ${YOUR_PHONE_NUMBER}
+      ALLOWED_PHONE_NUMBERS:   ${ALLOWED_PHONE_NUMBERS:-}
+      ANTHROPIC_API_KEY:       ${ANTHROPIC_API_KEY}
+      ELEVENLABS_API_KEY:      ${ELEVENLABS_API_KEY}
+      ELEVENLABS_VOICE_ID:     ${ELEVENLABS_VOICE_ID:-21m00Tcm4TlvDq8ikWAM}
+      ELEVENLABS_MODEL_ID:     ${ELEVENLABS_MODEL_ID:-eleven_flash_v2}
+      DEEPGRAM_API_KEY:        ${DEEPGRAM_API_KEY}
+      N8N_WEBHOOK_URL:         http://n8n:5678/webhook
+      N8N_TASK_TOKEN:          ${N8N_TASK_TOKEN}
+      GOOGLE_CREDENTIALS_PATH: /data/google-credentials.json
+      GOOGLE_CALENDAR_ID:      ${GOOGLE_CALENDAR_ID:-primary}
+      OPENWEATHER_API_KEY:     ${OPENWEATHER_API_KEY:-}
+      DEFAULT_LOCATION:        ${DEFAULT_LOCATION:-New York}
+      CHROMA_PERSIST_DIR:      /data/chromadb
+      FACTS_DB_PATH:           /data/facts.sqlite
+      NOTES_DIR:               /data/notes
+      MEMORY_TOP_K:            ${MEMORY_TOP_K:-5}
+      TIMEZONE:                ${TIMEZONE:-America/New_York}
+      MORNING_BRIEFING_HOUR:   ${MORNING_BRIEFING_HOUR:-7}
+      MORNING_BRIEFING_MINUTE: ${MORNING_BRIEFING_MINUTE:-0}
+      ENABLE_EVENING_DIGEST:   ${ENABLE_EVENING_DIGEST:-false}
+      PUBLIC_URL:              ${PUBLIC_URL}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── PostgreSQL (n8n's database) ───────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    networks: [friday_net]
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB:       ${POSTGRES_DB:-n8n}
+      POSTGRES_USER:     ${POSTGRES_USER:-n8n}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-n8n}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── n8n (workflow orchestration) ─────────────────────────────────────────
+  n8n:
+    image: n8nio/n8n:latest
+    restart: unless-stopped
+    networks: [friday_net]
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./n8n/workflows:/workflows:ro   # workflows available to import via CLI
+    environment:
+      DB_TYPE:                    postgresdb
+      DB_POSTGRESDB_HOST:         postgres
+      DB_POSTGRESDB_PORT:         5432
+      DB_POSTGRESDB_DATABASE:     ${POSTGRES_DB:-n8n}
+      DB_POSTGRESDB_USER:         ${POSTGRES_USER:-n8n}
+      DB_POSTGRESDB_PASSWORD:     ${POSTGRES_PASSWORD}
+      N8N_ENCRYPTION_KEY:         ${N8N_ENCRYPTION_KEY}
+      N8N_HOST:                   ${N8N_HOST:-0.0.0.0}
+      N8N_PORT:                   5678
+      N8N_PROTOCOL:               ${N8N_PROTOCOL:-http}
+      WEBHOOK_URL:                ${PUBLIC_URL}
+      GENERIC_TIMEZONE:           ${TIMEZONE:-America/New_York}
+      # Variables accessible inside workflows via $vars.*
+      N8N_VARIABLES_ENABLED:      true
+      N8N_TASK_TOKEN:             ${N8N_TASK_TOKEN}
+      ALLOWED_PHONE_NUMBERS:      ${ALLOWED_PHONE_NUMBERS:-}
+      VOICE_SERVICE_URL:          http://voice:8000
+      TWILIO_PHONE_NUMBER:        ${TWILIO_PHONE_NUMBER}
+      BRAVE_SEARCH_API_KEY:       ${BRAVE_SEARCH_API_KEY:-}

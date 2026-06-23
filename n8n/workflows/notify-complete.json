@@ -1,0 +1,52 @@
+{
+  "name": "Friday — Notify Complete",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger-notify",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const result = $input.first().json.result || 'Task complete.';\nconst phone = $input.first().json.callback_phone;\nconst taskName = $input.first().json.task_name || 'task';\nreturn [{ json: { to: phone, body: `Friday — ${taskName} complete:\\n\\n${result}` } }];"
+      },
+      "id": "build-sms",
+      "name": "Build SMS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "from": "={{ $vars.TWILIO_PHONE_NUMBER }}",
+        "to": "={{ $json.to }}",
+        "body": "={{ $json.body }}"
+      },
+      "id": "send-sms",
+      "name": "Send SMS",
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [680, 300],
+      "credentials": {
+        "twilioApi": {
+          "id": "twilio-creds",
+          "name": "Twilio"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [[{ "node": "Build SMS", "type": "main", "index": 0 }]]
+    },
+    "Build SMS": {
+      "main": [[{ "node": "Send SMS", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": ["friday", "utility"]
+}

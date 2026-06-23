@@ -1,0 +1,178 @@
+{
+  "name": "Friday — SMS Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "sms",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-sms",
+      "name": "Twilio SMS Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || $input.first().json;\nconst from = body.From || '';\nconst allowed = ($vars.ALLOWED_PHONE_NUMBERS || '').split(',').map(n => n.trim()).filter(Boolean);\nif (allowed.length && !allowed.includes(from)) {\n  return [{ json: { blocked: true, twiml: '<?xml version=\"1.0\"?><Response></Response>' } }];\n}\nreturn [{ json: { blocked: false, from, messageBody: body.Body || '', messageSid: body.MessageSid || '' } }];"
+      },
+      "id": "validate-caller",
+      "name": "Validate Caller",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [{ "value1": "={{ $json.blocked }}", "value2": true }]
+        }
+      },
+      "id": "if-blocked",
+      "name": "Blocked?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Response></Response>",
+        "options": {
+          "responseHeaders": {
+            "entries": [{ "name": "Content-Type", "value": "text/xml" }]
+          }
+        }
+      },
+      "id": "respond-blocked",
+      "name": "Respond Empty (Blocked)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [900, 180]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.VOICE_SERVICE_URL }}/tools/recall",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-Task-Token", "value": "={{ $vars.N8N_TASK_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "bodyContentType": "json",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "query", "value": "={{ $json.messageBody }}" }
+          ]
+        },
+        "options": { "timeout": 8000 }
+      },
+      "id": "memory-recall",
+      "name": "Memory: Recall Context",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [900, 420]
+    },
+    {
+      "parameters": {
+        "jsCode": "const message = $('Validate Caller').item.json.messageBody;\nconst memory = $input.first().json.result || '';\nconst memCtx = memory && memory !== \"I don't have anything stored about that.\" ? `\\nRelevant memory: ${memory}` : '';\nreturn [{ json: { prompt: message + memCtx } }];"
+      },
+      "id": "build-prompt",
+      "name": "Build Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 420]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "claude-sonnet-4-6",
+          "mode": "list",
+          "cachedResultName": "claude-sonnet-4-6"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "={{ $json.prompt }}"
+            }
+          ]
+        },
+        "options": {
+          "maxTokensToSample": 320,
+          "systemMessage": "You are Friday, a personal AI assistant responding via SMS. Keep replies concise (under 160 characters when possible, 2 SMS segments max). Be helpful and direct. Do not use bullet points."
+        }
+      },
+      "id": "claude-reply",
+      "name": "Claude: Generate Reply",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1,
+      "position": [1340, 420],
+      "credentials": {
+        "anthropicApi": {
+          "id": "anthropic-creds",
+          "name": "Anthropic"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nconst reply = raw.text || raw.content?.[0]?.text || raw.output || 'Got your message.';\nconst twiml = `<?xml version=\"1.0\" encoding=\"UTF-8\"?><Response><Message>${reply.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</Message></Response>`;\nreturn [{ json: { twiml } }];"
+      },
+      "id": "build-twiml",
+      "name": "Build TwiML",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 420]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.twiml }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [{ "name": "Content-Type", "value": "text/xml" }]
+          }
+        }
+      },
+      "id": "respond-sms",
+      "name": "Respond with TwiML",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1780, 420]
+    }
+  ],
+  "connections": {
+    "Twilio SMS Webhook": {
+      "main": [[{ "node": "Validate Caller", "type": "main", "index": 0 }]]
+    },
+    "Validate Caller": {
+      "main": [[{ "node": "Blocked?", "type": "main", "index": 0 }]]
+    },
+    "Blocked?": {
+      "main": [
+        [{ "node": "Respond Empty (Blocked)", "type": "main", "index": 0 }],
+        [{ "node": "Memory: Recall Context", "type": "main", "index": 0 }]
+      ]
+    },
+    "Memory: Recall Context": {
+      "main": [[{ "node": "Build Prompt", "type": "main", "index": 0 }]]
+    },
+    "Build Prompt": {
+      "main": [[{ "node": "Claude: Generate Reply", "type": "main", "index": 0 }]]
+    },
+    "Claude: Generate Reply": {
+      "main": [[{ "node": "Build TwiML", "type": "main", "index": 0 }]]
+    },
+    "Build TwiML": {
+      "main": [[{ "node": "Respond with TwiML", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": ["friday", "sms"]
+}

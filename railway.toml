@@ -1,0 +1,13 @@
+# Railway deployment config for the Friday voice service.
+# Deploy n8n as a separate Railway service using the n8n template.
+
+[build]
+builder = "dockerfile"
+dockerfilePath = "voice/Dockerfile"
+buildCommand = ""
+
+[deploy]
+startCommand = "uvicorn voice.main:app --host 0.0.0.0 --port $PORT --log-level info"
+healthcheckPath = "/health"
+healthcheckTimeout = 300
+restartPolicyType = "always"
